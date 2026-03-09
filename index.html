@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>2026 AM Goal Dashboard | Invos</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#060d18;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:#0d1f38}
+::-webkit-scrollbar-thumb{background:#1a3358;border-radius:3px}
+select option{background:#0d1f38;color:#e2e8f0}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.fade{animation:fadeIn 0.3s ease}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.spin{animation:spin 0.9s linear infinite;display:inline-block}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ── 常數 ──────────────────────────────────────────────────────────
+const TEAM_ANNUAL_GOAL = 120000000;
+const AVG_NEW_CLIENT   = 300000;
+
+const OWNER_MAP = {
+  "699497618":  "Helen",
+  "1238823096": "Yvonne",
+  "80411630":   "Megan",
+  "159919059":  "Ethan",
+  "959579815":  "Vicky",
+  "78812708":   "Andy",
+  "1458325751": "Ray",
+};
+
+const STAGE_CFG = {
+  "Active Customer(活躍客戶)":           {color:"#22c55e",bg:"#052e16",short:"Active"},
+  "Growth / Expansion（成長／擴張中）":  {color:"#3b82f6",bg:"#0c1a2e",short:"Growth"},
+  "Active Evaluation(積極評估中)":       {color:"#f59e0b",bg:"#1c1200",short:"Eval"},
+  "Target Account(目標客戶)":            {color:"#a78bfa",bg:"#1e0a3c",short:"Target"},
+  "At Risk（高風險）":                   {color:"#ef4444",bg:"#2d0707",short:"At Risk"},
+  "Churned / Dormant（流失／休眠）":     {color:"#6b7280",bg:"#111827",short:"Churned"},
+};
+const LEVEL_CFG = {
+  "Top Account":       {color:"#fbbf24",dot:"★"},
+  "Key Account":       {color:"#60a5fa",dot:"◆"},
+  "Potential Account": {color:"#34d399",dot:"●"},
+  "SMB":               {color:"#9ca3af",dot:"·"},
+};
+const RISK_CFG = {
+  "高：掉客風險":                      {color:"#ef4444",bg:"#2d0707",tier:"高"},
+  "HIGH":                             {color:"#ef4444",bg:"#2d0707",tier:"高"},
+  "高：範疇失控":                      {color:"#ef4444",bg:"#2d0707",tier:"高"},
+  "高：驗收標準雙方認知嚴重不一致":     {color:"#ef4444",bg:"#2d0707",tier:"高"},
+  "高：財務風險：請款 / 收款異常":      {color:"#ef4444",bg:"#2d0707",tier:"高"},
+  "高：重大品質/成效問題":             {color:"#ef4444",bg:"#2d0707",tier:"高"},
+  "中：已超過180天無成交交易":         {color:"#f97316",bg:"#2c1400",tier:"中"},
+  "中：專案預算縮減":                  {color:"#f59e0b",bg:"#1c1200",tier:"中"},
+  "MEDIUM":                           {color:"#f59e0b",bg:"#1c1200",tier:"中"},
+  "中：客戶內部決策流程慢/":           {color:"#f59e0b",bg:"#1c1200",tier:"中"},
+  "中：客戶期待過高/與預算不匹配":     {color:"#f59e0b",bg:"#1c1200",tier:"中"},
+  "中：客戶內部意見多頭馬車":          {color:"#f59e0b",bg:"#1c1200",tier:"中"},
+  "低：局部交付品質需優化":            {color:"#facc15",bg:"#1c1800",tier:"低"},
+  "低：客戶內部人事小調整":            {color:"#facc15",bg:"#1c1800",tier:"低"},
+  "低：依賴單一窗口":                  {color:"#facc15",bg:"#1c1800",tier:"低"},
+  "健康無風險":                        {color:"#22c55e",bg:"#052e16",tier:"健康"},
+};
+
+// ── 工具函式 ──────────────────────────────────────────────────────
+const fmt = n => {
+  if (!n && n!==0) return "—";
+  if (n>=1000000) return `${(n/1000000).toFixed(1)}M`;
+  if (n>=1000) return `${Math.round(n/1000)}K`;
+  return String(n);
+};
+const calcPct = (a,g) => g>0 ? Math.round(a/g*100) : null;
+const pctColor = p => p==null?"#64748b":p>=80?"#22c55e":p>=50?"#f59e0b":"#ef4444";
+const ownerName = id => OWNER_MAP[id]||(id?`(${id.slice(-4)})`:"—");
+const isAtRisk = c => c.stage?.includes("At Risk")||c.stage?.includes("Churned");
+const riskLabel = v => {
+  if (!v) return null;
+  if (v==="HIGH")   return "高：關鍵決策人失聯";
+  if (v==="MEDIUM") return "中：需求頻繁變更";
+  return v;
+};
+
+// ── App ───────────────────────────────────────────────────────────
+function App() {
+  const [data,       setData]       = useState([]);
+  const [updatedAt,  setUpdatedAt]  = useState("");
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState(null);
+
+  const [tab,         setTab]         = useState("overview");
+  const [filterAM,    setFilterAM]    = useState("all");
+  const [filterStage, setFilterStage] = useState("all");
+  const [filterLevel, setFilterLevel] = useState("all");
+  const [filterRisk,  setFilterRisk]  = useState("all");
+  const [sortCol,     setSortCol]     = useState("acv");
+  const [sortDir,     setSortDir]     = useState("desc");
+  const [search,      setSearch]      = useState("");
+
+  useEffect(() => {
+    fetch(`data.json?t=${Date.now()}`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => { setData(d.records||[]); setUpdatedAt(d.updated_at||""); })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const allAMs = [...new Set(data.map(c=>c.oid).filter(Boolean))].sort();
+
+  const rows = data.filter(c=>{
+    if (filterAM    !=="all" && c.oid   !==filterAM)    return false;
+    if (filterStage !=="all" && c.stage !==filterStage)  return false;
+    if (filterLevel !=="all" && c.level !==filterLevel)  return false;
+    if (filterRisk  !=="all" && (RISK_CFG[c.risk]||{}).tier!==filterRisk) return false;
+    if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  }).sort((a,b)=>sortDir==="desc"?(b[sortCol]||0)-(a[sortCol]||0):(a[sortCol]||0)-(b[sortCol]||0));
+
+  const sortToggle = col => { if(sortCol===col) setSortDir(d=>d==="desc"?"asc":"desc"); else{setSortCol(col);setSortDir("desc");} };
+  const arr = col => sortCol===col?(sortDir==="desc"?" ↓":" ↑"):"";
+
+  const teamGoal   = data.reduce((s,c)=>s+(c.acv||0),0);
+  const teamActual = data.reduce((s,c)=>s+(c.a26||0),0);
+  const teamPct    = calcPct(teamActual,teamGoal);
+  const atRiskCnt  = data.filter(c=>c.stage?.includes("At Risk")).length;
+  const churnedCnt = data.filter(c=>c.stage?.includes("Churned")).length;
+  const activeCnt  = data.filter(c=>c.stage?.includes("Active Customer")).length;
+
+  const amStats = allAMs.map(id=>{
+    const cs=data.filter(c=>c.oid===id);
+    const goal=cs.reduce((s,c)=>s+(c.acv||0),0);
+    const actual=cs.reduce((s,c)=>s+(c.a26||0),0);
+    const prev=cs.reduce((s,c)=>s+(c.a25||0),0);
+    return{id,name:ownerName(id),count:cs.length,goal,actual,prev,pct:calcPct(actual,goal),risk:cs.filter(c=>isAtRisk(c)).length,clients:cs};
+  }).sort((a,b)=>b.goal-a.goal);
+
+  const riskRows = data.filter(c=>isAtRisk(c)).sort((a,b)=>(b.acv||0)-(a.acv||0));
+
+  // ── Styles ──
+  const G = {
+    page:{background:"#060d18",minHeight:"100vh",paddingBottom:48},
+    hdr:{background:"linear-gradient(135deg,#091525,#0d1f38)",borderBottom:"1px solid #1a3358",padding:"16px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10},
+    nav:{display:"flex",background:"#091525",borderBottom:"1px solid #1a3358",padding:"0 24px",overflowX:"auto"},
+    nb:a=>({background:"transparent",border:"none",borderBottom:a?"2px solid #3b82f6":"2px solid transparent",color:a?"#60a5fa":"#64748b",padding:"11px 16px",cursor:"pointer",fontSize:13,fontWeight:a?500:400,fontFamily:"inherit",whiteSpace:"nowrap"}),
+    body:{padding:"20px 24px"},
+    row:{display:"flex",gap:12,marginBottom:18,flexWrap:"wrap"},
+    card:{background:"#0d1f38",border:"1px solid #1a3358",borderRadius:10,padding:"16px 20px"},
+    lbl:{fontSize:11,color:"#64748b",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:5},
+    val:{fontSize:24,fontWeight:600,color:"#f1f5f9",fontFamily:"'Courier New',monospace"},
+    sub:{fontSize:12,color:"#64748b",marginTop:3},
+    sec:{fontSize:11,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:12},
+    tbl:{width:"100%",borderCollapse:"collapse",fontSize:13},
+    th:{textAlign:"left",padding:"9px 10px",color:"#64748b",fontSize:11,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:"1px solid #1a3358",cursor:"pointer",userSelect:"none",whiteSpace:"nowrap"},
+    td:{padding:"9px 10px",borderBottom:"1px solid #0c1e36",color:"#e2e8f0",verticalAlign:"top"},
+    pill:(c,b)=>({display:"inline-block",padding:"2px 6px",borderRadius:4,fontSize:11,fontWeight:500,color:c||"#9ca3af",background:b||"#1f2937",whiteSpace:"nowrap"}),
+    bar:{height:5,borderRadius:3,background:"#1a3358",position:"relative",overflow:"hidden"},
+    barf:p=>({position:"absolute",left:0,top:0,height:"100%",borderRadius:3,width:`${Math.min(p||0,120)}%`,background:pctColor(p),transition:"width 0.6s"}),
+    inp:{background:"#0d1f38",border:"1px solid #1a3358",color:"#e2e8f0",borderRadius:6,padding:"7px 10px",fontSize:13,outline:"none",fontFamily:"inherit"},
+    sel:{background:"#0d1f38",border:"1px solid #1a3358",color:"#e2e8f0",borderRadius:6,padding:"7px 9px",fontSize:13,cursor:"pointer",outline:"none",fontFamily:"inherit"},
+  };
+
+  const RiskPill = ({v})=>{
+    if(!v) return <span style={{color:"#374151"}}>—</span>;
+    const cfg=RISK_CFG[v]||{};
+    const label=riskLabel(v)||v;
+    const short=label.replace(/^[高中低健康]+[：:]/,"");
+    return <span style={G.pill(cfg.color,cfg.bg)} title={label}>{cfg.tier||"?"} · {short.slice(0,12)}{short.length>12?"…":""}</span>;
+  };
+  const PctBadge = ({a,g})=>{
+    const p=calcPct(a,g);
+    if(p==null) return <span style={{color:"#64748b"}}>—</span>;
+    return <span style={{fontSize:12,fontFamily:"'Courier New',monospace",color:pctColor(p)}}>{p}%</span>;
+  };
+  const ClientRow = ({c,showAM})=>{
+    const sc=STAGE_CFG[c.stage]||{}, lc=LEVEL_CFG[c.level]||{};
+    const risk=isAtRisk(c);
+    return (
+      <tr style={{background:risk?"rgba(239,68,68,0.03)":""}}>
+        <td style={{...G.td,color:risk?"#fca5a5":"#e2e8f0",fontWeight:risk?500:400}}>
+          {risk&&<span style={{fontSize:10,marginRight:4}}>{c.stage?.includes("Churned")?"✕":"⚠"}</span>}{c.name}
+        </td>
+        {showAM&&<td style={{...G.td,color:"#94a3b8"}}>{ownerName(c.oid)}</td>}
+        <td style={G.td}><span style={{color:lc.color||"#64748b",fontSize:12}}>{lc.dot} {c.level||"—"}</span></td>
+        <td style={G.td}><span style={G.pill(sc.color,sc.bg)}>{sc.short||"—"}</span></td>
+        <td style={{...G.td,textAlign:"right",fontFamily:"'Courier New',monospace",fontSize:12}}>{fmt(c.acv)}</td>
+        <td style={{...G.td,textAlign:"right",fontFamily:"'Courier New',monospace",fontSize:12,color:"#22c55e"}}>{c.a26?fmt(c.a26):"—"}</td>
+        <td style={{...G.td,textAlign:"right",fontFamily:"'Courier New',monospace",fontSize:12,color:"#64748b"}}>{fmt(c.a25)}</td>
+        <td style={{...G.td,textAlign:"right"}}><PctBadge a={c.a26} g={c.acv}/></td>
+        <td style={G.td}><RiskPill v={c.risk}/></td>
+        <td style={{...G.td,fontSize:12,color:"#94a3b8"}}>
+          {c.plan?<span title={c.plan} style={{display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}}>{c.plan}</span>:<span style={{color:"#374151"}}>—</span>}
+        </td>
+      </tr>
+    );
+  };
+  const TblHead = ({showAM})=>(
+    <thead style={{background:"#091525"}}>
+      <tr>
+        <th style={G.th}>客戶名稱</th>
+        {showAM&&<th style={G.th}>AM</th>}
+        <th style={G.th}>等級</th><th style={G.th}>階段</th>
+        <th style={{...G.th,textAlign:"right"}} onClick={()=>sortToggle("acv")}>Goal{arr("acv")}</th>
+        <th style={{...G.th,textAlign:"right"}} onClick={()=>sortToggle("a26")}>YTD{arr("a26")}</th>
+        <th style={{...G.th,textAlign:"right"}} onClick={()=>sortToggle("a25")}>2025{arr("a25")}</th>
+        <th style={{...G.th,textAlign:"right"}}>達成率</th>
+        <th style={G.th}>客戶風險</th>
+        <th style={{...G.th,minWidth:180}}>下一步計畫</th>
+      </tr>
+    </thead>
+  );
+
+  if (loading) return (
+    <div style={{...G.page,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,color:"#64748b"}}>
+      <span className="spin" style={{fontSize:32}}>⟳</span>
+      <span style={{fontSize:14}}>載入資料中…</span>
+    </div>
+  );
+  if (error) return (
+    <div style={{...G.page,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,color:"#ef4444"}}>
+      <span style={{fontSize:28}}>⚠</span>
+      <span style={{fontSize:14}}>無法載入資料：{error}</span>
+      <span style={{fontSize:12,color:"#64748b"}}>請確認 data.json 是否存在於 repo 根目錄</span>
+    </div>
+  );
+
+  return (
+    <div style={G.page} className="fade">
+      {/* Header */}
+      <div style={G.hdr}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:32,height:32,background:"linear-gradient(135deg,#3b82f6,#1d4ed8)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:14,color:"#fff"}}>G</div>
+          <div>
+            <div style={{fontSize:17,fontWeight:600,color:"#f1f5f9"}}>2026 AM Goal Dashboard</div>
+            <div style={{fontSize:11,color:"#64748b",marginTop:1,display:"flex",gap:8,alignItems:"center"}}>
+              <span>🕐 資料更新時間：{updatedAt}</span>
+              <span style={{color:"#22c55e",fontSize:10,background:"#052e16",padding:"1px 6px",borderRadius:4}}>每日 08:00 / 14:00 自動更新</span>
+              <span style={{color:"#374151"}}>·</span>
+              <span>{data.length} 個客戶</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Nav */}
+      <div style={G.nav}>
+        {[["overview","📊 總覽"],["am","👤 AM 進度"],["risk","⚠ 風險警示"],["clients","📋 客戶列表"],["defs","📖 名詞定義"]].map(([k,l])=>(
+          <button key={k} style={G.nb(tab===k)} onClick={()=>setTab(k)}>{l}</button>
+        ))}
+      </div>
+
+      <div style={G.body}>
+
+        {/* ── 總覽 ── */}
+        {tab==="overview" && (()=>{
+          const gap=TEAM_ANNUAL_GOAL-teamGoal;
+          const newNeeded=Math.ceil(gap/AVG_NEW_CLIENT);
+          const annualPct=calcPct(teamGoal,TEAM_ANNUAL_GOAL);
+          const ytdAnnualPct=calcPct(teamActual,TEAM_ANNUAL_GOAL);
+          return <>
+            {/* 年度目標全貌 */}
+            <div style={{...G.card,marginBottom:18,border:"1px solid #1e3a5f",background:"linear-gradient(135deg,#0a1929,#0d1f38)"}}>
+              <div style={{fontSize:12,fontWeight:600,color:"#60a5fa",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:14}}>
+                📌 2026 AM Team 年度目標全貌
+              </div>
+              <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:16}}>
+                <div style={{flex:"0 0 auto",minWidth:155,background:"#091525",borderRadius:8,padding:"12px 16px",border:"1px solid #1e3a5f"}}>
+                  <div style={{fontSize:10,color:"#60a5fa",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>AM Team 年度總目標</div>
+                  <div style={{fontSize:22,fontWeight:700,color:"#60a5fa",fontFamily:"'Courier New',monospace"}}>NT$120M</div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:3}}>全團隊 2026 年度目標</div>
+                </div>
+                <div style={{flex:"0 0 auto",minWidth:155,background:"#091525",borderRadius:8,padding:"12px 16px",border:"1px solid #1a3358"}}>
+                  <div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>既有客戶目標小計</div>
+                  <div style={{fontSize:22,fontWeight:700,color:"#f1f5f9",fontFamily:"'Courier New',monospace"}}>NT${fmt(teamGoal)}</div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:3}}>{data.length} 個既有客戶 · 佔年度 {annualPct??0}%</div>
+                </div>
+                <div style={{flex:"0 0 auto",minWidth:155,background:"#1a0c00",borderRadius:8,padding:"12px 16px",border:"1px solid #7c2d12"}}>
+                  <div style={{fontSize:10,color:"#f97316",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>距年度目標缺口</div>
+                  <div style={{fontSize:22,fontWeight:700,color:"#f97316",fontFamily:"'Courier New',monospace"}}>-NT${fmt(gap)}</div>
+                  <div style={{fontSize:11,color:"#92400e",marginTop:3}}>需補足此缺口才能達成年度目標</div>
+                </div>
+                <div style={{flex:"0 0 auto",minWidth:155,background:"#0a1a0a",borderRadius:8,padding:"12px 16px",border:"1px solid #14532d"}}>
+                  <div style={{fontSize:10,color:"#4ade80",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>預估需新開發客戶數</div>
+                  <div style={{fontSize:22,fontWeight:700,color:"#4ade80",fontFamily:"'Courier New',monospace"}}>{newNeeded} 個</div>
+                  <div style={{fontSize:11,color:"#166534",marginTop:3}}>以新客平均客單 NT$30萬 估算</div>
+                </div>
+                <div style={{flex:"0 0 auto",minWidth:155,background:"#091525",borderRadius:8,padding:"12px 16px",border:"1px solid #1a3358"}}>
+                  <div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>2026 YTD 實際</div>
+                  <div style={{fontSize:22,fontWeight:700,color:pctColor(ytdAnnualPct),fontFamily:"'Courier New',monospace"}}>NT${fmt(teamActual)}</div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:3}}>佔年度總目標 {ytdAnnualPct??0}%</div>
+                </div>
+              </div>
+              <div style={{marginBottom:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:11,color:"#64748b"}}>既有客戶目標 vs 年度總目標</span>
+                  <span style={{fontSize:11,color:"#94a3b8",fontFamily:"'Courier New',monospace"}}>{fmt(teamGoal)} / 120M ({annualPct??0}%)</span>
+                </div>
+                <div style={{height:8,borderRadius:4,background:"#1a3358",position:"relative",overflow:"hidden",marginBottom:8}}>
+                  <div style={{position:"absolute",left:0,top:0,height:"100%",borderRadius:4,width:`${Math.min(annualPct||0,100)}%`,background:"#3b82f6",transition:"width 0.6s"}}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:11,color:"#64748b"}}>YTD 實際 vs 年度總目標</span>
+                  <span style={{fontSize:11,color:"#94a3b8",fontFamily:"'Courier New',monospace"}}>{fmt(teamActual)} / 120M ({ytdAnnualPct??0}%)</span>
+                </div>
+                <div style={{height:8,borderRadius:4,background:"#1a3358",position:"relative",overflow:"hidden"}}>
+                  <div style={{position:"absolute",left:0,top:0,height:"100%",borderRadius:4,width:`${Math.min(ytdAnnualPct||0,100)}%`,background:pctColor(ytdAnnualPct),transition:"width 0.6s"}}/>
+                </div>
+              </div>
+              <div style={{marginTop:10,padding:"8px 12px",background:"#0c1e36",borderRadius:6,fontSize:12,color:"#64748b",lineHeight:1.7}}>
+                ⚠ 既有 {data.length} 個客戶的總目標 NT${fmt(teamGoal)} 僅佔年度總目標的 {annualPct??0}%，尚有 NT${fmt(gap)} 缺口需靠新客填補。
+                以平均客單 NT$30萬 估算，需新開發 <span style={{color:"#4ade80",fontWeight:600}}>{newNeeded} 個新客</span> 才能達成年度總目標。
+              </div>
+            </div>
+
+            {/* KPI 卡片 */}
+            <div style={G.row}>
+              {[
+                {lbl:"2026 YTD 實際",val:`NT$${fmt(teamActual)}`,sub:`達成率（vs 既有目標）${teamPct??0}%`,vc:pctColor(teamPct)},
+                {lbl:"⚠ 高風險",val:atRiskCnt,sub:"At Risk",vc:"#ef4444",bc:"#7f1d1d"},
+                {lbl:"✕ 流失/休眠",val:churnedCnt,sub:"Churned",vc:"#6b7280"},
+                {lbl:"✓ 活躍客戶",val:activeCnt,sub:"Active Customer",vc:"#22c55e"},
+              ].map(k=>(
+                <div key={k.lbl} style={{...G.card,flex:"0 0 auto",minWidth:150,borderColor:k.bc||"#1a3358"}}>
+                  <div style={G.lbl}>{k.lbl}</div>
+                  <div style={{...G.val,color:k.vc||"#f1f5f9"}}>{k.val}</div>
+                  <div style={G.sub}>{k.sub}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{...G.card,marginBottom:18}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}>
+                <span style={G.lbl}>既有客戶達成進度（YTD vs 既有目標）</span>
+                <span style={{fontSize:12,color:"#94a3b8",fontFamily:"'Courier New',monospace"}}>{fmt(teamActual)} / {fmt(teamGoal)} ({teamPct??0}%)</span>
+              </div>
+              <div style={G.bar}><div style={G.barf(teamPct)}/></div>
+            </div>
+
+            {/* AM 快覽 + 分布 */}
+            <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+              <div style={{...G.card,flex:2,minWidth:340}}>
+                <div style={G.sec}>AM 進度一覽</div>
+                {amStats.map(am=>{
+                  const p=am.pct??0;
+                  return (
+                    <div key={am.id} style={{marginBottom:14}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                          <span style={{fontSize:13,fontWeight:500,color:"#f1f5f9"}}>{am.name}</span>
+                          <span style={{fontSize:11,color:"#64748b"}}>{am.count}c</span>
+                          {am.risk>0&&<span style={{fontSize:10,color:"#ef4444",background:"#2d0707",padding:"1px 5px",borderRadius:3}}>⚠{am.risk}</span>}
+                        </div>
+                        <span style={{fontSize:12,fontFamily:"'Courier New',monospace",color:pctColor(p)}}>{fmt(am.actual)} / {fmt(am.goal)} ({p}%)</span>
+                      </div>
+                      <div style={G.bar}><div style={G.barf(p)}/></div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{...G.card,flex:1,minWidth:160}}>
+                <div style={G.sec}>客戶階段分布</div>
+                {Object.keys(STAGE_CFG).map(s=>{
+                  const cnt=data.filter(c=>c.stage===s).length;
+                  if(!cnt) return null;
+                  return (
+                    <div key={s} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #0c1e36"}}>
+                      <span style={{fontSize:12,color:STAGE_CFG[s].color}}>{STAGE_CFG[s].short}</span>
+                      <span style={{fontSize:13,fontWeight:600,color:"#f1f5f9"}}>{cnt}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{...G.card,flex:1,minWidth:150}}>
+                <div style={G.sec}>客戶等級分布</div>
+                {Object.keys(LEVEL_CFG).map(l=>{
+                  const cnt=data.filter(c=>c.level===l).length;
+                  if(!cnt) return null;
+                  return (
+                    <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #0c1e36"}}>
+                      <span style={{fontSize:12,color:LEVEL_CFG[l].color}}>{LEVEL_CFG[l].dot} {l}</span>
+                      <span style={{fontSize:13,fontWeight:600,color:"#f1f5f9"}}>{cnt}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>;
+        })()}
+
+        {/* ── AM 進度 ── */}
+        {tab==="am" && amStats.map(am=>{
+          const p=am.pct??0;
+          return (
+            <div key={am.id} style={{...G.card,marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:16,fontWeight:600,color:"#f1f5f9",marginBottom:3}}>{am.name}</div>
+                  <div style={{display:"flex",gap:10,fontSize:12,color:"#64748b"}}>
+                    <span>{am.count} 個客戶</span>
+                    <span style={{color:"#ef4444"}}>⚠ {am.clients.filter(c=>c.stage?.includes("At Risk")).length} At Risk</span>
+                    <span style={{color:"#6b7280"}}>✕ {am.clients.filter(c=>c.stage?.includes("Churned")).length} Churned</span>
+                  </div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:19,fontWeight:600,fontFamily:"'Courier New',monospace",color:pctColor(p)}}>{p}%</div>
+                  <div style={{fontSize:11,color:"#64748b"}}>達成率</div>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+                {[
+                  {l:"2026 Goal",v:`NT$${fmt(am.goal)}`},
+                  {l:"YTD 實際",v:`NT$${fmt(am.actual)}`,c:pctColor(p)},
+                  {l:"2025 實際",v:`NT$${fmt(am.prev)}`},
+                  {l:"YoY Goal 差",v:`${am.goal-am.prev>=0?"+":""}NT$${fmt(Math.abs(am.goal-am.prev))}`,c:am.goal>=am.prev?"#22c55e":"#ef4444"},
+                ].map(k=>(
+                  <div key={k.l} style={{background:"#060d18",borderRadius:6,padding:"8px 12px",flex:1,minWidth:100}}>
+                    <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>{k.l}</div>
+                    <div style={{fontSize:14,fontWeight:600,fontFamily:"'Courier New',monospace",color:k.c||"#e2e8f0"}}>{k.v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={G.bar}><div style={G.barf(p)}/></div>
+              <div style={{marginTop:12,overflowX:"auto"}}>
+                <table style={G.tbl}>
+                  <TblHead showAM={false}/>
+                  <tbody>{am.clients.sort((a,b)=>(b.acv||0)-(a.acv||0)).map(c=><ClientRow key={c.id} c={c} showAM={false}/>)}</tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
+
+        {/* ── 風險警示 ── */}
+        {tab==="risk" && <>
+          <div style={G.row}>
+            <div style={{...G.card,background:"#1a0808",border:"1px solid #7f1d1d",flex:1,minWidth:160}}>
+              <div style={{...G.lbl,color:"#ef4444"}}>⚠ At Risk</div>
+              <div style={{...G.val,color:"#ef4444"}}>{atRiskCnt}</div>
+              <div style={G.sub}>NT${fmt(data.filter(c=>c.stage?.includes("At Risk")).reduce((s,c)=>s+(c.acv||0),0))} combined goal</div>
+            </div>
+            <div style={{...G.card,background:"#0e0e0e",flex:1,minWidth:160}}>
+              <div style={{...G.lbl,color:"#6b7280"}}>✕ Churned</div>
+              <div style={{...G.val,color:"#6b7280"}}>{churnedCnt}</div>
+              <div style={G.sub}>NT${fmt(data.filter(c=>c.stage?.includes("Churned")).reduce((s,c)=>s+(c.acv||0),0))} combined goal</div>
+            </div>
+            <div style={{...G.card,flex:2,minWidth:220}}>
+              <div style={G.sec}>風險客戶 by AM</div>
+              {amStats.filter(am=>am.risk>0).map(am=>(
+                <div key={am.id} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #0c1e36"}}>
+                  <span style={{fontSize:13}}>{am.name}</span>
+                  <span style={{fontSize:12,color:"#ef4444"}}>⚠ {am.risk}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{...G.card,padding:0,overflow:"hidden"}}>
+            <div style={{padding:"12px 16px",borderBottom:"1px solid #1a3358"}}><span style={G.sec}>風險客戶完整清單</span></div>
+            <div style={{overflowX:"auto"}}>
+              <table style={G.tbl}>
+                <thead style={{background:"#091525"}}>
+                  <tr>
+                    <th style={G.th}>客戶名稱</th><th style={G.th}>AM</th><th style={G.th}>等級</th><th style={G.th}>階段</th>
+                    <th style={{...G.th,textAlign:"right"}}>Goal</th><th style={{...G.th,textAlign:"right"}}>2025</th><th style={{...G.th,textAlign:"right"}}>落差</th>
+                    <th style={G.th}>客戶風險</th><th style={{...G.th,minWidth:180}}>下一步計畫</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {riskRows.map(c=>{
+                    const sc=STAGE_CFG[c.stage]||{}, lc=LEVEL_CFG[c.level]||{};
+                    const gap=(c.acv||0)-(c.a26||0);
+                    return (
+                      <tr key={c.id}>
+                        <td style={{...G.td,fontWeight:500}}><span style={{fontSize:10,marginRight:4}}>{c.stage?.includes("Churned")?"✕":"⚠"}</span>{c.name}</td>
+                        <td style={{...G.td,color:"#94a3b8"}}>{ownerName(c.oid)}</td>
+                        <td style={G.td}><span style={{color:lc.color||"#64748b",fontSize:12}}>{lc.dot} {c.level||"—"}</span></td>
+                        <td style={G.td}><span style={{...(()=>G.pill(sc.color,sc.bg))()}}>{sc.short||"—"}</span></td>
+                        <td style={{...G.td,textAlign:"right",fontFamily:"'Courier New',monospace",fontSize:12}}>{fmt(c.acv)}</td>
+                        <td style={{...G.td,textAlign:"right",fontFamily:"'Courier New',monospace",fontSize:12,color:"#64748b"}}>{fmt(c.a25)}</td>
+                        <td style={{...G.td,textAlign:"right",fontFamily:"'Courier New',monospace",fontSize:12,color:gap>0?"#ef4444":"#22c55e"}}>{gap>0?`-${fmt(gap)}`:`+${fmt(Math.abs(gap))}`}</td>
+                        <td style={G.td}><RiskPill v={c.risk}/></td>
+                        <td style={{...G.td,fontSize:12,color:"#94a3b8"}}>
+                          {c.plan?<span title={c.plan} style={{display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}}>{c.plan}</span>:<span style={{color:"#374151"}}>—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>}
+
+        {/* ── 客戶列表 ── */}
+        {tab==="clients" && <>
+          <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="搜尋客戶名稱…" style={{...G.inp,flex:1,minWidth:150}}/>
+            <select value={filterAM}    onChange={e=>setFilterAM(e.target.value)}    style={G.sel}><option value="all">全部 AM</option>{allAMs.map(id=><option key={id} value={id}>{ownerName(id)}</option>)}</select>
+            <select value={filterLevel} onChange={e=>setFilterLevel(e.target.value)} style={G.sel}><option value="all">全部等級</option>{Object.keys(LEVEL_CFG).map(l=><option key={l} value={l}>{l}</option>)}</select>
+            <select value={filterStage} onChange={e=>setFilterStage(e.target.value)} style={G.sel}><option value="all">全部階段</option>{Object.keys(STAGE_CFG).map(s=><option key={s} value={s}>{STAGE_CFG[s].short}</option>)}</select>
+            <select value={filterRisk}  onChange={e=>setFilterRisk(e.target.value)}  style={G.sel}><option value="all">全部風險</option>{["高","中","低","健康"].map(t=><option key={t} value={t}>{t}</option>)}</select>
+            <span style={{fontSize:12,color:"#64748b"}}>{rows.length}/{data.length}</span>
+          </div>
+          <div style={{...G.card,padding:0,overflow:"hidden"}}>
+            <div style={{overflowX:"auto"}}>
+              <table style={G.tbl}><TblHead showAM={true}/><tbody>{rows.map(c=><ClientRow key={c.id} c={c} showAM={true}/>)}</tbody></table>
+            </div>
+          </div>
+        </>}
+
+        {/* ── 名詞定義 ── */}
+        {tab==="defs" && (
+          <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+            <div style={{...G.card,flex:1,minWidth:240}}>
+              <div style={{fontSize:14,fontWeight:600,marginBottom:16,color:"#f1f5f9"}}>客戶等級</div>
+              {[["Top Account","#fbbf24","年度策略帳戶，最高商業價值，通常百萬以上 ACV。"],["Key Account","#60a5fa","重要客戶，有穩定合作與成長潛力。"],["Potential Account","#34d399","具擴展空間但目前規模較小，需積極跟進。"],["SMB","#9ca3af","中小型品牌，維持穩定服務，機會型成長。"]].map(([l,c,d])=>(
+                <div key={l} style={{padding:"10px 0",borderBottom:"1px solid #1a3358"}}>
+                  <div style={{fontSize:13,fontWeight:600,color:c,marginBottom:4}}>{LEVEL_CFG[l]?.dot} {l}</div>
+                  <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.6}}>{d}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{...G.card,flex:1,minWidth:240}}>
+              <div style={{fontSize:14,fontWeight:600,marginBottom:16,color:"#f1f5f9"}}>客戶階段</div>
+              {[["Active Customer(活躍客戶)","目前有活躍合作，正常付費，客情穩定。"],["Active Evaluation(積極評估中)","正在評估新提案，有明確機會但尚未確認。"],["At Risk（高風險）","⚠ 出現流失信號，需立即採取挽留行動。"],["Churned / Dormant（流失／休眠）","✕ 已流失或長期停止合作。"]].map(([s,d])=>{
+                const cfg=STAGE_CFG[s]||{};
+                return (
+                  <div key={s} style={{padding:"10px 0",borderBottom:"1px solid #1a3358"}}>
+                    <div style={{marginBottom:4}}><span style={{...G.pill(cfg.color,cfg.bg)}}>{cfg.short||s}</span></div>
+                    <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.6}}>{d}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{...G.card,flex:1,minWidth:220}}>
+              <div style={{fontSize:14,fontWeight:600,marginBottom:16,color:"#f1f5f9"}}>欄位說明</div>
+              {[["Goal","2026 年度合約目標金額（ACV）。"],["YTD","2026 年至今已成交金額。"],["2025","2025 年度總成交金額，YoY 基準。"],["達成率","YTD ÷ Goal × 100%。"],["落差","Goal 減去 YTD 的缺口。"]].map(([f,d])=>(
+                <div key={f} style={{padding:"9px 0",borderBottom:"1px solid #1a3358"}}>
+                  <div style={{fontSize:12,fontWeight:600,color:"#60a5fa",marginBottom:3,fontFamily:"'Courier New',monospace"}}>{f}</div>
+                  <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.6}}>{d}</div>
+                </div>
+              ))}
+              <div style={{marginTop:18,padding:"12px",background:"#091525",borderRadius:6,border:"1px solid #1a3358"}}>
+                <div style={{fontSize:12,fontWeight:600,color:"#60a5fa",marginBottom:6}}>🕐 自動更新說明</div>
+                <div style={{fontSize:12,color:"#64748b",lineHeight:1.7}}>
+                  資料每日台灣時間 08:00 及 14:00 自動從 HubSpot 同步。<br/>
+                  更新時間顯示於頁面頂部。無需任何人工操作。
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
