@@ -1,0 +1,35 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 只有登入用戶才能讀取 snapshots（HubSpot 快照資料）
+    match /snapshots/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false; // 只允許 GitHub Actions（Firebase Admin SDK）寫入
+    }
+
+    // 只有登入用戶才能讀取 meta（最後更新時間）
+    match /meta/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // allowed_emails 白名單：只允許後端寫入，前端可讀（供登入驗證使用）
+    match /allowed_emails/{docId} {
+      allow read: if true;  // 登入流程需要讀取
+      allow write: if false;
+    }
+
+    // 只有登入用戶才能讀取 AI 分析結果
+    match /insights/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // 其他所有文件：拒絕存取
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
