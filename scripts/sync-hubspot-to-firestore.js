@@ -26,7 +26,7 @@ const db = getFirestore();
 const HUBSPOT_TOKEN    = process.env.HUBSPOT_TOKEN;
 const GEMINI_KEY       = process.env.GEMINI_API_KEY;
 const HUBSPOT_API      = 'https://api.hubapi.com';
-const GEMINI_API       = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_API       = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
 
 const COMPANY_FILTERS = [
   { propertyName: 'inv_clientlevel', operator: 'HAS_PROPERTY' },
