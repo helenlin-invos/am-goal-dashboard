@@ -11,7 +11,7 @@
  *   HUBSPOT_TOKEN            - HubSpot Private App Token
  *   FIREBASE_SERVICE_ACCOUNT - Firebase 服務帳號 JSON（字串形式）
  *   FIREBASE_PROJECT_ID      - Firebase Project ID
- *   ANTHROPIC_API_KEY        - Anthropic API Key（Claude AI 分析用）
+ *   GEMINI_API_KEY           - Google Gemini API Key（AI 分析用，免費方案）
  */
 
 import { initializeApp, cert } from 'firebase-admin/app';
@@ -24,9 +24,9 @@ const db = getFirestore();
 
 // ─── 設定 ──────────────────────────────────────────────────────────────────
 const HUBSPOT_TOKEN    = process.env.HUBSPOT_TOKEN;
-const ANTHROPIC_KEY    = process.env.ANTHROPIC_API_KEY;
+const GEMINI_KEY       = process.env.GEMINI_API_KEY;
 const HUBSPOT_API      = 'https://api.hubapi.com';
-const ANTHROPIC_API    = 'https://api.anthropic.com/v1/messages';
+const GEMINI_API       = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
 const COMPANY_FILTERS = [
   { propertyName: 'inv_clientlevel', operator: 'HAS_PROPERTY' },
@@ -189,28 +189,24 @@ const PROMPTS = {
   nextStep: ctx => `${ctx}\n\nHelen 作為 Sales Manager，請給她本週最重要的行動計劃：\n\n## 本週必做（Top 5 Actions）\n（依影響力排序，每項附具體客戶名/AM名/時間）\n\n## 需要 Helen 親自介入的客戶\n（附理由和建議切入角度）\n\n## AM Coaching 重點\n（哪位 AM 本週需要特別關注，重點是什麼）\n\n## 本週成功指標\n（具體數字：哪些客戶應在本週確認/簽約/推進）\n\n繁體中文，像寫給自己的作戰計劃，直接可執行。`,
 };
 
-async function callClaude(prompt) {
-  const res = await fetch(ANTHROPIC_API, {
+async function callGemini(prompt) {
+  const url = `${GEMINI_API}?key=${GEMINI_KEY}`;
+  const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type':      'application/json',
-      'x-api-key':         ANTHROPIC_KEY,
-      'anthropic-version': '2023-06-01',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model:      'claude-haiku-4-5-20251001',
-      max_tokens: 1800,
-      messages:   [{ role: 'user', content: prompt }],
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 1800 },
     }),
   });
 
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`Anthropic API ${res.status}: ${txt}`);
+    throw new Error(`Gemini API ${res.status}: ${txt}`);
   }
 
   const data = await res.json();
-  return data.content?.[0]?.text || '';
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 
 // ─── 主程式 ────────────────────────────────────────────────────────────────
@@ -241,8 +237,8 @@ async function main() {
 
   // 3. 呼叫 Claude 生成 5 種分析（若無 key 則跳過）
   let insights = null;
-  if (ANTHROPIC_KEY) {
-    console.log('🤖 開始生成 AI 分析...');
+  if (GEMINI_KEY) {
+    console.log('🤖 開始生成 AI 分析（Gemini）...');
     const ctx = buildContext(companies);
     const types = ['health', 'risk', 'am', 'yoy', 'nextStep'];
     insights = {};
@@ -250,7 +246,7 @@ async function main() {
     for (const type of types) {
       try {
         console.log(`  → 生成 ${type} 分析...`);
-        insights[type] = await callClaude(PROMPTS[type](ctx));
+        insights[type] = await callGemini(PROMPTS[type](ctx));
         console.log(`  ✅ ${type} 完成`);
       } catch (e) {
         console.error(`  ⚠️ ${type} 生成失敗：${e.message}`);
@@ -259,7 +255,7 @@ async function main() {
     }
     console.log('✅ AI 分析全部完成');
   } else {
-    console.log('⚠️ 未設定 ANTHROPIC_API_KEY，跳過 AI 分析');
+    console.log('⚠️ 未設定 GEMINI_API_KEY，跳過 AI 分析');
   }
 
   // 4. 寫入 Firestore snapshots
