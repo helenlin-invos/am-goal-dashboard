@@ -16,6 +16,7 @@
 
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // ─── 初始化 Firebase Admin ─────────────────────────────────────────────────
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -26,7 +27,6 @@ const db = getFirestore();
 const HUBSPOT_TOKEN    = process.env.HUBSPOT_TOKEN;
 const GEMINI_KEY       = process.env.GEMINI_API_KEY;
 const HUBSPOT_API      = 'https://api.hubapi.com';
-const GEMINI_API       = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
 
 const COMPANY_FILTERS = [
   { propertyName: 'inv_clientlevel', operator: 'HAS_PROPERTY' },
@@ -190,23 +190,10 @@ const PROMPTS = {
 };
 
 async function callGemini(prompt) {
-  const url = `${GEMINI_API}?key=${GEMINI_KEY}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 1800 },
-    }),
-  });
-
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Gemini API ${res.status}: ${txt}`);
-  }
-
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const genAI = new GoogleGenerativeAI(GEMINI_KEY);
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const result = await model.generateContent(prompt);
+  return result.response.text();
 }
 
 // ─── 主程式 ────────────────────────────────────────────────────────────────
